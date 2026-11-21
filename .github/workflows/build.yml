@@ -1,0 +1,142 @@
+name: Build Find X2 Pro Droidspaces + KernelSU-Next kernel
+
+# Target: OPPO Find X2 Pro (PDEM30), ColorOS 13.1, stock kernel 4.19.157-perf+
+# Source: jacid233/android_kernel_oplus_sm8250 @ oss-t (4.19.157, ColorOS 13)
+# Workflow: checkout source -> apply Droidspaces patches -> integrate KernelSU-Next
+#           -> merge config fragment -> build with clang-r383902b1 + GCC 4.9
+#           -> pack AnyKernel3 flashable zip -> upload artifact
+
+on:
+  workflow_dispatch:
+
+env:
+  KERNEL_REPO: jacid233/android_kernel_oplus_sm8250
+  KERNEL_BRANCH: oss-t
+  KSU_REPO: KernelSU-Next/KernelSU-Next
+  KSU_BRANCH: next
+  DEFCONFIG: stock_defconfig
+  JOBS: 8
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out build assets (config fragment, patches, packaging script)
+        uses: actions/checkout@v4
+        with:
+          path: build-assets
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential flex bison libssl-dev libelf-dev \
+            bc zip curl git ccache libncurses-dev dwarves python2 python3
+
+      - name: Clone kernel source
+        run: |
+          git clone --depth=1 -b ${KERNEL_BRANCH} \
+            https://github.com/${KERNEL_REPO}.git kernel
+          cd kernel
+          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)[[:space:]]*=' Makefile | head -3
+
+      - name: Apply Droidspaces non-GKI patches
+        run: |
+          cd kernel
+          for p in ../build-assets/patches/droidspaces/*.patch; do
+            echo "Applying $p"
+            patch -p1 --forward < "$p"
+          done
+
+      - name: Integrate KernelSU-Next (legacy / non-GKI, kprobe hooks)
+        run: |
+          cd kernel
+          curl -LSs "https://raw.githubusercontent.com/${KSU_REPO}/${KSU_BRANCH}/kernel/setup.sh" | bash -s legacy
+          grep -q '^obj-\$(CONFIG_KSU)' drivers/Makefile
+          grep -q 'CONFIG_KSU=y' "$GITHUB_WORKSPACE/build-assets/configs/droidspaces.config"
+
+      - name: Download toolchains
+        run: |
+          mkdir -p toolchain
+          cd toolchain
+          # Clang + GCC 4.9 used by the official ColorOS 13 sm8250 kernel
+          curl -L --retry 5 -o clang.tar.gz \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r383902b1.tar.gz
+          mkdir -p clang && tar -xzf clang.tar.gz -C clang
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc64
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc32
+
+      - name: Build kernel
+        run: |
+          set -e
+          cd kernel
+          TC=$GITHUB_WORKSPACE/toolchain
+          export ARCH=arm64
+          export PATH="$TC/clang/bin:$PATH"
+          CROSS_COMPILE="$TC/gcc64/bin/aarch64-linux-android-"
+          CROSS_COMPILE_ARM32="$TC/gcc32/bin/arm-linux-androideabi-"
+          CLANG_TRIPLE="aarch64-linux-gnu-"
+
+          mkdir -p out
+          make -j${JOBS} O=out \
+            ARCH=arm64 CC=clang \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+            CLANG_TRIPLE="$CLANG_TRIPLE" \
+            KCFLAGS="-Wno-error" \
+            vendor/$DEFCONFIG
+
+          # Append Droidspaces + KernelSU config fragment and resolve dependencies
+          cat "$GITHUB_WORKSPACE/build-assets/configs/droidspaces.config" >> out/.config
+          make -j${JOBS} O=out \
+            ARCH=arm64 CC=clang \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+            CLANG_TRIPLE="$CLANG_TRIPLE" \
+            KCFLAGS="-Wno-error" \
+            olddefconfig
+
+          # Verify the options we care about actually survived olddefconfig
+          for opt in CONFIG_KSU=y CONFIG_NAMESPACES=y CONFIG_PID_NS=y CONFIG_IPC_NS=y \
+                     CONFIG_SYSVIPC=y CONFIG_POSIX_MQUEUE=y CONFIG_NET_NS=y CONFIG_VETH=y \
+                     CONFIG_BRIDGE=y CONFIG_DEVTMPFS=y CONFIG_OVERLAY_FS=y \
+                     CONFIG_CGROUPS=y CONFIG_MEMCG=y CONFIG_CFS_BANDWIDTH=y \
+                     CONFIG_CGROUP_PIDS=y CONFIG_ANDROID_PARANOID_NETWORK=n; do
+            grep -q "$opt" out/.config || { echo "MISSING CONFIG: $opt"; exit 1; }
+          done
+
+          make -j${JOBS} O=out \
+            ARCH=arm64 CC=clang \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
+            CLANG_TRIPLE="$CLANG_TRIPLE" \
+            KCFLAGS="-Wno-error"
+
+          test -f out/arch/arm64/boot/Image || { echo "No Image built"; exit 1; }
+
+      - name: Verify built kernel image
+        run: |
+          cd kernel
+          file out/arch/arm64/boot/Image
+          ls -lh out/arch/arm64/boot/Image
+
+      - name: Pack AnyKernel3 flashable zip
+        run: |
+          set -e
+          cd $GITHUB_WORKSPACE
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          cp kernel/out/arch/arm64/boot/Image AnyKernel3/Image
+          cp kernel/out/arch/arm64/boot/Image.gz AnyKernel3/Image.gz 2>/dev/null || true
+          cp kernel/out/arch/arm64/boot/dtb AnyKernel3/dtb 2>/dev/null || true
+          cp kernel/out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img 2>/dev/null || true
+          cp build-assets/scripts/anykernel.sh AnyKernel3/anykernel.sh
+          cd AnyKernel3
+          zip -r9 ../FindX2Pro-Droidspaces-KSU-kernel.zip . -x '*.git*' README.md
+          cd ..
+          ls -lh FindX2Pro-Droidspaces-KSU-kernel.zip
+
+      - name: Upload flashable kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: FindX2Pro-Droidspaces-KSU-kernel
+          path: FindX2Pro-Droidspaces-KSU-kernel.zip
+          if-no-files-found: error
