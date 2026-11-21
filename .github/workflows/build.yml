@@ -120,7 +120,7 @@ jobs:
                      CONFIG_VETH=y CONFIG_BRIDGE=y CONFIG_DEVTMPFS=y \
                      CONFIG_OVERLAY_FS=y CONFIG_CGROUPS=y CONFIG_MEMCG=y \
                      CONFIG_CFS_BANDWIDTH=y CONFIG_CGROUP_PIDS=y \
-                     CONFIG_ANDROID_PARANOID_NETWORK=n; do
+                     '# CONFIG_ANDROID_PARANOID_NETWORK is not set'; do
             grep -q "$opt" out/.config || { echo "MISSING CONFIG: $opt"; echo '--- .config tail ---'; tail -80 out/.config; exit 1; }
           done
 
