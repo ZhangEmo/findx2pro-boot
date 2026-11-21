@@ -7,7 +7,7 @@
 - 你的内核是 **4.19.157，非 GKI（non-GKI）内核**。Droidspaces 对非 GKI 内核只需「开启配置 + 打两个补丁」，**不需要** GKI 那套 kABI 填充补丁（那是 5.4+ 才需要的）。
 - 匹配的内核源码是 [`jacid233/android_kernel_oplus_sm8250`](https://github.com/jacid233/android_kernel_oplus_sm8250) 的 **`oss-t` 分支**：Makefile 正好是 4.19.157，README 说明是官方开源的 ColorOS 13 内核整理版、Find X2 / Ace2 通用，defconfig 为 `arch/arm64/configs/vendor/stock_defconfig`。
   - 注意：官方 [`oppo-source/kernel_msm-4.19`](https://github.com/oppo-source/kernel_msm-4.19) 的 `find-x2-r` 分支只有 4.19.110，与你的 .157 不符，不要用。
-- Root 方案：官方 KernelSU 从 v1.0 起放弃非 GKI 支持（最后支持版 v0.9.5）；本包改用专为此维护的 **KernelSU-Next `legacy` 分支**（明确支持 4.19 的非 GKI 内核，走 kprobe 自动集成）。
+- Root 方案：官方 KernelSU 从 v1.0 起放弃非 GKI 支持（最后支持版 v0.9.5）；本包改用专为此维护的 **KernelSU-Next `legacy` 分支**（明确支持 4.19 的非 GKI 内核）。该分支默认走手动 hook（需源码内联补丁），本包改用其内置的 **syscall-table hook**（`CONFIG_KSU_SYSCALL_TABLE_HOOK=y`，适用于 4.17+ 内核），无需改内核源码。
 
 ## 目录结构
 
@@ -64,7 +64,7 @@ bash scripts/build_kernel.sh
 
 - 刷自定义内核需要解锁 Bootloader，**有变砖和数据丢失风险**，请先备份。
 - Droidspaces 官方不支持非 GKI 设备的所有功能；4.19 上 systemd 容器请选用 systemd < 258 的发行版（如 Debian 12/13、Alpine）。
-- 如果集成 KernelSU-Next 后无法开机，多为该内核 kprobe 损坏：把 `configs/droidspaces.config` 里的 `CONFIG_KSU=y`、kprobe 相关选项删除后重新编译，或改用 KernelSU-Next 文档中的「手动修改内核源码」方式。
+- 本内核 4.19 使用 syscall-table hook（已在配置中启用 `CONFIG_KSU_SYSCALL_TABLE_HOOK=y`），此方式无需 kprobe，兼容性更好。若集成后无法开机，把 `configs/droidspaces.config` 里的 `CONFIG_KSU=y` 与 `CONFIG_KSU_SYSCALL_TABLE_HOOK=y` 删除后重新编译，即可恢复无 Root 的纯 Droidspaces 内核。
 
 ## 参考
 

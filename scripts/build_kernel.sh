@@ -16,6 +16,16 @@ CLANG_TRIPLE="aarch64-linux-gnu-"
 DEFCONFIG=${DEFCONFIG:-stock_defconfig}
 JOBS=${JOBS:-$(nproc)}
 KSU_BRANCH=${KSU_BRANCH:-legacy}
+# Python 2 is EOL and absent on modern distros; the kernel Makefile invokes
+# "python2" via scripts/gcc-wrapper.py. Add a shim if missing.
+command -v python2 >/dev/null 2>&1 || {
+  echo "[+] Creating python2 -> python3 shim (sudo required once)"
+  sudo tee /usr/local/bin/python2 >/dev/null <<'PYEOF'
+#!/bin/sh
+exec python3 "$@"
+PYEOF
+  sudo chmod +x /usr/local/bin/python2
+}
 
 # ---------- Sanity checks ----------
 for d in "$KERNEL_DIR" "$CLANG_PATH" "$TC/gcc64/bin" "$TC/gcc32/bin"; do
