@@ -67,6 +67,16 @@ jobs:
           grep -q '^obj-\$(CONFIG_KSU)' drivers/Makefile
           grep -q 'CONFIG_KSU=y' "$GITHUB_WORKSPACE/build-assets/configs/droidspaces.config"
 
+          # Fix KSU-Next legacy strscpy_pad backport bug on 4.19:
+          #   __strscpy_pad() gates on LINUX_VERSION_CODE >= 4.14.222 and calls
+          #   strscpy_pad(), which only exists in >= 5.4. On 4.19 that is an
+          #   implicit declaration -> -Werror build failure. Raise the gate to
+          #   5.4.0 so 4.19 uses the strscpy()+memset() fallback branch.
+          sed -i 's/KERNEL_VERSION(4, 14, 222)/KERNEL_VERSION(5, 4, 0)/' \
+            KernelSU-Next/kernel/compat/kernel_compat.h
+          grep -q 'KERNEL_VERSION(5, 4, 0)' KernelSU-Next/kernel/compat/kernel_compat.h || {
+            echo "strscpy_pad fix failed"; exit 1; }
+
       - name: Download toolchains
         run: |
           mkdir -p toolchain
