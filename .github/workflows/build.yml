@@ -45,6 +45,10 @@ jobs:
             https://github.com/${KERNEL_REPO}.git kernel
           cd kernel
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL)[[:space:]]*=' Makefile | head -3
+          # stock_defconfig lives at arch/arm64/configs/, NOT in vendor/.
+          test -f arch/arm64/configs/${DEFCONFIG} || \
+            { echo "Missing arch/arm64/configs/${DEFCONFIG}"; \
+              ls arch/arm64/configs/ | head -40; exit 1; }
 
       - name: Apply Droidspaces non-GKI patches
         run: |
@@ -96,7 +100,7 @@ jobs:
             CROSS_COMPILE_ARM32="$CROSS_COMPILE_ARM32" \
             CLANG_TRIPLE="$CLANG_TRIPLE" \
             KCFLAGS="-Wno-error" \
-            vendor/$DEFCONFIG
+            $DEFCONFIG
 
           # Append Droidspaces + KernelSU config fragment and resolve dependencies
           cat "$GITHUB_WORKSPACE/build-assets/configs/droidspaces.config" >> out/.config
